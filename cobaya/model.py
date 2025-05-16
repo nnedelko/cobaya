@@ -13,7 +13,8 @@ from copy import deepcopy
 from itertools import chain
 from typing import NamedTuple, Sequence, Mapping, Iterable, Optional, \
     Union, List, Any, Dict, Set, Tuple
-import numpy as np
+#import numpy as np
+import jax.numpy as jnp
 
 # Local
 from cobaya.conventions import overhead_time, get_chi2_name, \
@@ -110,9 +111,9 @@ class LogPosterior:
         passed.
         """
         if self.finite:
-            return np.isclose(np.nan_to_num(self.logpost), np.nan_to_num(self._logpost()))
+            return jnp.isclose(jnp.nan_to_num(self.logpost), jnp.nan_to_num(self._logpost()))
         else:
-            return np.isclose(self.logpost, self._logpost())
+            return jnp.isclose(self.logpost, self._logpost())
 
     def make_finite(self):
         """
@@ -121,13 +122,13 @@ class LogPosterior:
         """
         object.__setattr__(self, 'finite', True)
         if self.logpost is not None:
-            object.__setattr__(self, 'logpost', np.nan_to_num(self.logpost))
+            object.__setattr__(self, 'logpost', jnp.nan_to_num(self.logpost))
         if self.logpriors is not None:
-            object.__setattr__(self, 'logpriors', np.nan_to_num(self.logpriors))
-            object.__setattr__(self, 'logprior', np.nan_to_num(self.logprior))
+            object.__setattr__(self, 'logpriors', jnp.nan_to_num(self.logpriors))
+            object.__setattr__(self, 'logprior', jnp.nan_to_num(self.logprior))
         if self.loglikes is not None:
-            object.__setattr__(self, 'loglikes', np.nan_to_num(self.loglikes))
-            object.__setattr__(self, 'loglike', np.nan_to_num(self.loglike))
+            object.__setattr__(self, 'loglikes', jnp.nan_to_num(self.loglikes))
+            object.__setattr__(self, 'loglike', jnp.nan_to_num(self.loglike))
 
     def as_dict(self, model: "Model") -> Dict[str, Union[float, Dict[str, float]]]:
         """
@@ -177,8 +178,8 @@ def _dict_equal(d1, d2):
     # dict/None equality test accounting for numpy arrays not supporting standard eq
     if type(d1) != type(d2):
         return False
-    if isinstance(d1, np.ndarray):
-        return np.array_equal(d1, d2)
+    if isinstance(d1, jnp.ndarray):
+        return jnp.array_equal(d1, d2)
     if not d1 and not d2:
         return True
     if bool(d1) != bool(d2):
@@ -268,15 +269,15 @@ class Model(HasLogger):
 
     def _to_sampled_array(self,
                           params_values: Union[Dict[str, float], Sequence[float]]
-                          ) -> np.ndarray:
+                          ) -> jnp.ndarray:
         """
         Internal method to interact with the prior.
         Needs correct (not renamed) parameter names.
         """
         if hasattr(params_values, "keys"):
-            params_values_array = np.array(list(params_values.values()))
+            params_values_array = jnp.array(list(params_values.values()))
         else:
-            params_values_array = np.atleast_1d(params_values)
+            params_values_array = jnp.atleast_1d(params_values)
             if params_values_array.shape[0] != self.prior.d():
                 raise LoggedError(
                     self.log, "Wrong dimensionality: it's %d, and it should be %d.",
@@ -289,7 +290,7 @@ class Model(HasLogger):
     def logpriors(self,
                   params_values: Union[Dict[str, float], Sequence[float]],
                   as_dict: bool = False, make_finite: bool = False
-                  ) -> Union[np.ndarray, Dict[str, float]]:
+                  ) -> Union[jnp.ndarray, Dict[str, float]]:
         """
         Takes an array or dictionary of sampled parameter values.
         If the argument is an array, parameters must have the same order as in the input.
@@ -309,9 +310,9 @@ class Model(HasLogger):
         """
         params_values = self.parameterization.check_sampled(params_values)
         params_values_array = self._to_sampled_array(params_values)
-        logpriors = np.asarray(self.prior.logps(params_values_array))
+        logpriors = jnp.asarray(self.prior.logps(params_values_array))
         if make_finite:
-            return np.nan_to_num(logpriors)
+            return jnp.nan_to_num(logpriors)
         if as_dict:
             return dict(zip(self.prior, logpriors))
         else:
@@ -332,16 +333,16 @@ class Model(HasLogger):
         If ``make_finite=True``, it will try to represent infinities as the largest real
         numbers allowed by machine precision.
         """
-        logprior = np.sum(self.logpriors(params_values))
+        logprior = jnp.sum(self.logpriors(params_values))
         if make_finite:
-            return np.nan_to_num(logprior)
+            return jnp.nan_to_num(logprior)
         return logprior
 
     def _loglikes_input_params(
             self, input_params: ParamValuesDict,
             return_derived: bool = True, return_output_params: bool = False,
             as_dict: bool = False, make_finite: bool = False, cached: bool = True
-    ) -> Union[np.ndarray, Dict[str, float], Tuple[np.ndarray, np.ndarray],
+    ) -> Union[jnp.ndarray, Dict[str, float], Tuple[jnp.ndarray, jnp.ndarray],
     Tuple[Dict[str, float], Dict[str, float]]]:
         """
         Takes a dict of input parameters, computes the likelihood pipeline, and returns
@@ -369,7 +370,7 @@ class Model(HasLogger):
         compute_success = True
         self.provider.set_current_input_params(input_params)
         self.param_dict_debug("Got input parameters: %r", input_params)
-        loglikes = np.zeros(len(self.likelihood))
+        loglikes = jnp.zeros(len(self.likelihood))
         need_derived = self.requires_derived or return_derived or return_output_params
         for (component, like_index), param_dep in zip(self._component_order.items(),
                                                       self._params_of_dependencies):
@@ -379,7 +380,7 @@ class Model(HasLogger):
                 params, want_derived=need_derived,
                 dependency_params=depend_list, cached=cached)
             if not compute_success:
-                loglikes[:] = -np.inf
+                loglikes[:] = -jnp.inf
                 self.log.debug("Calculation failed, skipping rest of calculations ")
                 break
             if return_derived or return_output_params:
@@ -394,16 +395,16 @@ class Model(HasLogger):
                         "but %s instead.", component,
                         component.current_logp) from type_excpt
         if make_finite:
-            loglikes = np.nan_to_num(loglikes)
+            loglikes = jnp.nan_to_num(loglikes)
         return_likes = dict(zip(self.likelihood, loglikes)) if as_dict else loglikes
         if return_derived or return_output_params:
             if not compute_success:
                 return_params_names = (
                     self.output_params if return_output_params else self.derived_params)
                 if as_dict:
-                    return_params = dict.fromkeys(return_params_names, np.nan)
+                    return_params = dict.fromkeys(return_params_names, jnp.nan)
                 else:
-                    return_params = [np.nan] * len(return_params_names)
+                    return_params = [jnp.nan] * len(return_params_names)
             else:
                 # Add chi2's to derived parameters
                 for chi2_name, indices in self._chi2_names:
@@ -423,7 +424,7 @@ class Model(HasLogger):
                  params_values: Optional[Union[Dict[str, float], Sequence[float]]] = None,
                  as_dict: bool = False, make_finite: bool = False,
                  return_derived: bool = True, cached: bool = True
-                 ) -> Union[np.ndarray, Dict[str, float], Tuple[np.ndarray, np.ndarray],
+                 ) -> Union[jnp.ndarray, Dict[str, float], Tuple[jnp.ndarray, jnp.ndarray],
     Tuple[Dict[str, float], Dict[str, float]]]:
         """
         Takes an array or dictionary of sampled parameter values.
@@ -459,7 +460,7 @@ class Model(HasLogger):
     def loglike(self,
                 params_values: Optional[Union[Dict[str, float], Sequence[float]]] = None,
                 make_finite: bool = False, return_derived: bool = True,
-                cached: bool = True) -> Union[float, Tuple[float, np.ndarray]]:
+                cached: bool = True) -> Union[float, Tuple[float, jnp.ndarray]]:
         """
         Takes an array or dictionary of sampled parameter values.
         If the argument is an array, parameters must have the same order as in the input.
@@ -484,9 +485,9 @@ class Model(HasLogger):
         ret_value = self.loglikes(params_values, return_derived=return_derived,
                                   cached=cached, make_finite=make_finite)
         if return_derived:
-            return np.sum(ret_value[0]), ret_value[1]
+            return jnp.sum(ret_value[0]), ret_value[1]
         else:
-            return np.sum(ret_value)
+            return jnp.sum(ret_value)
 
     def logposterior(self,
                      params_values: Union[Dict[str, float], Sequence[float]],
@@ -538,7 +539,7 @@ class Model(HasLogger):
                     "Posterior to be computed for parameters %s",
                     dict(zip(self.parameterization.sampled_params(),
                              params_values_array.astype(float))))
-            if not np.all(np.isfinite(params_values_array)):
+            if not jnp.all(jnp.isfinite(params_values_array)):
                 raise LoggedError(
                     self.log, "Got non-finite parameter values: %r",
                     dict(zip(self.parameterization.sampled_params(),
@@ -546,14 +547,14 @@ class Model(HasLogger):
         # Notice that we don't use the make_finite in the prior call,
         # to correctly check if we have to compute the likelihood
         logpriors_1d = self.prior.logps_internal(params_values_array)
-        if logpriors_1d == -np.inf:
-            logpriors = [-np.inf] * (1 + len(self.prior.external))
+        if logpriors_1d == -jnp.inf:
+            logpriors = [-jnp.inf] * (1 + len(self.prior.external))
         else:
             input_params = self.parameterization.to_input(params_values_array)
             logpriors = [logpriors_1d]
             if self.prior.external:
                 logpriors.extend(self.prior.logps_external(input_params))
-        if -np.inf not in logpriors:
+        if -jnp.inf not in logpriors:
             # noinspection PyUnboundLocalVariable
             like = self._loglikes_input_params(input_params,
                                                return_derived=return_derived,
@@ -592,7 +593,7 @@ class Model(HasLogger):
     def get_valid_point(self, max_tries: int, ignore_fixed_ref: bool = False,
                         logposterior_as_dict: bool = False, random_state=None,
                         ) \
-            -> Union[Tuple[np.ndarray, LogPosterior], Tuple[np.ndarray, dict]]:
+            -> Union[Tuple[jnp.ndarray, LogPosterior], Tuple[jnp.ndarray, dict]]:
         """
         Finds a point with finite posterior, sampled from the reference pdf.
 
@@ -614,7 +615,7 @@ class Model(HasLogger):
                                                  warn_if_no_ref=not loop,
                                                  random_state=random_state)
             results = self.logposterior(initial_point)
-            if results.logpost != -np.inf:
+            if results.logpost != -jnp.inf:
                 break
         else:
             if self.prior.reference_is_pointlike:
@@ -1141,7 +1142,7 @@ class Model(HasLogger):
             speeds[comp] = (speeds[comp] ** -1 + self.overhead) ** -1
         # Compute "footprint"
         # i.e. likelihoods (and theory) that we must recompute when each parameter changes
-        footprints = np.zeros((len(self.sampled_dependence), len(speeds)), dtype=int)
+        footprints = jnp.zeros((len(self.sampled_dependence), len(speeds)), dtype=int)
         sampled_dependence_names = {k: [c.get_name() for c in v] for
                                     k, v in self.sampled_dependence.items()}
         for i, ls in enumerate(sampled_dependence_names.values()):
@@ -1154,7 +1155,7 @@ class Model(HasLogger):
         # a) Multiple blocks
         if not split_fast_slow:
             i_optimal_ordering, costs, oversample_factors = sort_parameter_blocks(
-                blocks, np.array(list(speeds.values()), dtype=float),
+                blocks, jnp.array(list(speeds.values()), dtype=float),
                 different_footprints, oversample_power=oversample_power)
             blocks_sorted = [blocks[i] for i in i_optimal_ordering]
         # b) 2-block slow-fast separation
@@ -1164,26 +1165,26 @@ class Model(HasLogger):
                                             "but all parameters have the same speed.")
             # First sort them optimally (w/o oversampling)
             i_optimal_ordering, costs, oversample_factors = sort_parameter_blocks(
-                blocks, np.array(list(speeds.values()), dtype=float),
+                blocks, jnp.array(list(speeds.values()), dtype=float),
                 different_footprints, oversample_power=0)
             blocks_sorted = [blocks[i] for i in i_optimal_ordering]
-            footprints_sorted = np.array(different_footprints)[list(i_optimal_ordering)]
+            footprints_sorted = jnp.array(different_footprints)[list(i_optimal_ordering)]
             # Then, find the split that maxes cost LOG-differences.
             # Since costs are already "accumulated down",
             # we need to subtract those below each one
-            costs_per_block = costs - np.concatenate([costs[1:], [0]])
+            costs_per_block = costs - jnp.concatenate([costs[1:], [0]])
             # Split them so that "adding the next block to the slow ones" has max cost
-            log_differences = np.log(costs_per_block[:-1]) - np.log(costs_per_block[1:])
-            i_last_slow: int = np.argmax(log_differences)  # type: ignore
+            log_differences = jnp.log(costs_per_block[:-1]) - jnp.log(costs_per_block[1:])
+            i_last_slow: int = jnp.argmax(log_differences)  # type: ignore
             blocks_split = (lambda L: [list(chain(*L[:i_last_slow + 1])),
                                        list(chain(*L[i_last_slow + 1:]))])(blocks_sorted)
             footprints_split = (
-                    [np.array(footprints_sorted[:i_last_slow + 1]).sum(axis=0)] +
-                    [np.array(footprints_sorted[i_last_slow + 1:]).sum(axis=0)])
-            footprints_split = np.clip(np.array(footprints_split), 0, 1)  # type: ignore
+                    [jnp.array(footprints_sorted[:i_last_slow + 1]).sum(axis=0)] +
+                    [jnp.array(footprints_sorted[i_last_slow + 1:]).sum(axis=0)])
+            footprints_split = jnp.clip(jnp.array(footprints_split), 0, 1)  # type: ignore
             # Recalculate oversampling factor with 2 blocks
             _, _, oversample_factors = sort_parameter_blocks(
-                blocks_split, np.array(list(speeds.values()), dtype=float),
+                blocks_split, jnp.array(list(speeds.values()), dtype=float),
                 footprints_split, oversample_power=oversample_power)
             # If no oversampling, slow-fast separation makes no sense: warn and set to 2
             if oversample_factors[1] == 1:
@@ -1241,8 +1242,8 @@ class Model(HasLogger):
         if unknown:
             raise LoggedError(
                 self.log, "Manual blocking: unknown parameters: %r", unknown)
-        oversampling_factors = np.array(oversampling_factors)
-        if np.all(oversampling_factors != np.sort(oversampling_factors)):
+        oversampling_factors = jnp.array(oversampling_factors)
+        if jnp.all(oversampling_factors != jnp.sort(oversampling_factors)):
             self.log.warning(
                 "Manual blocking: speed-blocking *apparently* non-optimal: "
                 "oversampling factors must go from small (slow) to large (fast).")
@@ -1280,7 +1281,7 @@ class Model(HasLogger):
         for component in self.components:
             component.set_timing_on(on)
 
-    def measure_and_set_speeds(self, n=None, discard=1, max_tries=np.inf,
+    def measure_and_set_speeds(self, n=None, discard=1, max_tries=jnp.inf,
                                random_state=None):
         """
         Measures the speeds of the different components (theories and likelihoods). To do
@@ -1300,14 +1301,14 @@ class Model(HasLogger):
                 point = self.prior.reference(random_state=random_state,
                                              max_tries=max_tries, ignore_fixed=True,
                                              warn_if_no_ref=False)
-                if self.loglike(point, cached=False)[0] != -np.inf:
+                if self.loglike(point, cached=False)[0] != -jnp.inf:
                     n_done += 1
             self.mpi_debug("Computed %d points to measure speeds.", n_done)
             times = [component.timer.get_time_avg() or 0  # type: ignore
                      for component in self.components]
         if mpi.more_than_one_process():
             # average for different points
-            times = np.average(mpi.allgather(times), axis=0)
+            times = jnp.average(mpi.allgather(times), axis=0)
         measured_speeds = [1 / (1e-7 + time) for time in times]
         self.mpi_info('Setting measured speeds (per sec): %r',
                       {component: float("%.3g" % speed) for component, speed in
